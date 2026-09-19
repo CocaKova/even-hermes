@@ -6,7 +6,7 @@ export const CONFIG_DIR = process.env.EVEN_HERMES_HOME || join(homedir(), ".even
 export const CONFIG_PATH = process.env.EVEN_HERMES_CONFIG || join(CONFIG_DIR, "config.json");
 
 export const DEFAULT_FIRST_PROMPT_NOTE =
-  "[Sent from Even G1 smart glasses. Replies render on a tiny monochrome HUD: " +
+  "[Sent from Even Realities smart glasses. Replies render on a tiny monochrome HUD: " +
   "keep them short, plain text, no tables or code fences unless asked.]";
 
 const DEFAULTS = {
