@@ -1,0 +1,19 @@
+{
+  "name": "even-hermes",
+  "version": "0.1.0",
+  "description": "Run your Hermes Agent on Even Realities G1 smart glasses: a codex app-server shim that bridges Even Terminal to the Hermes gateway.",
+  "type": "module",
+  "bin": {
+    "even-hermes": "bin/even-hermes.js"
+  },
+  "files": ["bin/", "shim/", "src/", "README.md", "LICENSE"],
+  "scripts": {
+    "test": "node --test \"test/*.test.js\""
+  },
+  "engines": { "node": ">=20" },
+  "keywords": ["hermes-agent", "even-realities", "even-terminal", "smart-glasses", "codex", "app-server", "bridge"],
+  "license": "MIT",
+  "dependencies": {
+    "ws": "^8.21.3"
+  }
+}

@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+// Even Terminal runs `codex app-server`; with this directory first on PATH it gets Hermes instead.
+import { main } from "../src/shim-main.js";
+main(process.argv.slice(2)).catch((err) => {
+  process.stderr.write(`[even-hermes] fatal: ${err.stack || err.message}\n`);
+  process.exit(1);
+});
