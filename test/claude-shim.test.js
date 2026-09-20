@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 import { ClaudeStream, claudeTool } from "../src/claude-stream.js";
@@ -47,9 +50,45 @@ test("an interrupted turn reports the way the SDK expects", () => {
   assert.deepEqual([out.at(-1).subtype, out.at(-1).terminal_reason], ["error_during_execution", "aborted_streaming"]);
 });
 
-test("the claude shim never runs or forwards to a real Claude Code", () => {
-  const shim = fileURLToPath(new URL("../shim/claude", import.meta.url));
-  const run = spawnSync(shim, ["-p", "hello"], { encoding: "utf8" });
+const shim = fileURLToPath(new URL("../shim/claude", import.meta.url));
+
+function home(providers) {
+  const dir = mkdtempSync(join(tmpdir(), "even-hermes-claude-"));
+  writeFileSync(join(dir, "config.json"), JSON.stringify({ providers }));
+  return dir;
+}
+
+test("providers.claude = hermes never runs or forwards to a real Claude Code", () => {
+  const dir = home({ claude: "hermes" });
+  const real = join(dir, "real-claude");
+  writeFileSync(real, "#!/bin/sh\necho REAL CLAUDE RAN\n", { mode: 0o755 });
+  const run = spawnSync(shim, ["-p", "hello"], { encoding: "utf8", env: { ...process.env, EVEN_HERMES_HOME: dir, EVEN_HERMES_REAL_CLAUDE: real } });
   assert.equal(run.status, 2);
+  assert.doesNotMatch(run.stdout, /REAL CLAUDE RAN/);
   assert.match(run.stderr, /never runs the real Claude Code/);
+});
+
+test("providers.claude = claude passes the real CLI through and says so once per new session", () => {
+  const dir = home({ claude: "claude" });
+  const real = join(dir, "real-claude");
+  const lines = [
+    { type: "system", subtype: "init", session_id: "abc" },
+    { type: "stream_event", session_id: "abc", event: { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "hi" } } },
+    { type: "result", subtype: "success", session_id: "abc", result: "hi" },
+  ];
+  writeFileSync(real, `#!/bin/sh\ncat <<'EOT'\n${lines.map((l) => JSON.stringify(l)).join("\n")}\nEOT\n`, { mode: 0o755 });
+  const env = { ...process.env, EVEN_HERMES_HOME: dir, EVEN_HERMES_REAL_CLAUDE: real, ANTHROPIC_API_KEY: "" };
+  const parse = (run) => run.stdout.trim().split("\n").map((l) => JSON.parse(l));
+
+  const fresh = parse(spawnSync(shim, ["--output-format", "stream-json"], { encoding: "utf8", env }));
+  assert.deepEqual(fresh.map((m) => m.type), ["system", "stream_event", "stream_event", "stream_event", "stream_event", "result"]);
+  assert.match(fresh[2].event.delta.text, /^\[Heads up: this is the real Claude Code on .+ using the Claude login there/);
+  assert.equal(fresh[2].session_id, "abc");
+  assert.deepEqual(fresh.at(-1), lines.at(-1), "the real output is untouched");
+
+  const resumed = parse(spawnSync(shim, ["--output-format", "stream-json", "--resume", "abc"], { encoding: "utf8", env }));
+  assert.deepEqual(resumed, lines, "a resumed session is not nagged again");
+
+  const keyed = parse(spawnSync(shim, ["--output-format", "stream-json"], { encoding: "utf8", env: { ...env, ANTHROPIC_API_KEY: "sk-test" } }));
+  assert.match(keyed[2].event.delta.text, /billed per token to the Anthropic API key/);
 });

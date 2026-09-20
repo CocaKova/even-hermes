@@ -30,6 +30,13 @@ const DEFAULTS = {
     reasoningEffort: "",
     firstPromptNote: DEFAULT_FIRST_PROMPT_NOTE,
   },
+  providers: {
+    // What the Even app's "Claude" provider runs on this machine:
+    // "claude" = the real Claude Code, untouched, with a one-line heads-up on the HUD at the start
+    //            of each new session saying which account it uses
+    // "hermes" = Hermes, like Codex (nothing on this machine can then reach a Claude account)
+    claude: "claude",
+  },
   hud: {
     // "end"   = a labeled tool row stays in progress until the tool finishes; its label shows then
     // "start" = the row completes as the tool starts, so the label shows while the tool runs
@@ -67,6 +74,9 @@ export function loadConfig(path = CONFIG_PATH) {
   if (env.EVEN_HERMES_TOKEN) cfg.gateway.token = env.EVEN_HERMES_TOKEN;
   if (cfg.gateway.mode !== "ws" && cfg.gateway.mode !== "stdio") {
     throw new Error(`gateway.mode must be "ws" or "stdio" (got ${JSON.stringify(cfg.gateway.mode)})`);
+  }
+  if (cfg.providers.claude !== "claude" && cfg.providers.claude !== "hermes") {
+    throw new Error(`providers.claude must be "claude" or "hermes" (got ${JSON.stringify(cfg.providers.claude)})`);
   }
   if (cfg.hud.labelAt !== "start" && cfg.hud.labelAt !== "end") {
     throw new Error(`hud.labelAt must be "start" or "end" (got ${JSON.stringify(cfg.hud.labelAt)})`);

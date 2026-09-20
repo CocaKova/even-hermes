@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { spawn, spawnSync } from "node:child_process";
-import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, realpathSync, writeFileSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_DIR, CONFIG_PATH, DEFAULT_FIRST_PROMPT_NOTE, loadConfig } from "../src/config.js";
@@ -25,6 +25,7 @@ async function doctor() {
   const config = loadConfig();
   console.log(`config:   ${existsSync(CONFIG_PATH) ? CONFIG_PATH : "(defaults — run `even-hermes init`)"}`);
   console.log(`gateway:  ${config.gateway.mode}${config.gateway.mode === "ws" ? ` → ${config.gateway.url}` : " (private tui_gateway process)"}`);
+  console.log(`claude:   the app's "Claude" provider → ${config.providers.claude === "hermes" ? "Hermes (no Claude account is contacted)" : "the REAL Claude Code on this machine (its Anthropic login or API key)"}`);
   const et = spawnSync("even-terminal", ["--version"], { encoding: "utf8" });
   console.log(`terminal: ${et.error ? "even-terminal NOT FOUND — npm i -g @evenrealities/even-terminal" : `even-terminal ${et.stdout.trim()}`}`);
   const hermes = new HermesClient(config.gateway, (line) => console.log(`          ${line}`));
@@ -38,6 +39,25 @@ async function doctor() {
   } finally {
     hermes.close();
   }
+}
+
+/** The Claude Code that Even Terminal would run on its own: the one its Agent SDK bundles, else PATH. */
+function findRealClaude() {
+  const exe = process.platform === "win32" ? "claude.exe" : "claude";
+  const which = spawnSync(process.platform === "win32" ? "where" : "which", ["even-terminal"], { encoding: "utf8" }).stdout?.split(/\r?\n/)[0]?.trim();
+  if (which) {
+    try {
+      const root = join(dirname(realpathSync(which)), "..");
+      for (const libc of ["", "-musl"]) {
+        const bundled = join(root, "node_modules", "@anthropic-ai", `claude-agent-sdk-${process.platform}-${process.arch}${libc}`, exe);
+        if (existsSync(bundled)) return bundled;
+      }
+    } catch { /* fall through to PATH */ }
+  }
+  for (const dir of (process.env.PATH ?? "").split(delimiter)) {
+    if (dir && dir !== shimDir && existsSync(join(dir, exe))) return join(dir, exe);
+  }
+  return null;
 }
 
 function init() {
@@ -63,18 +83,32 @@ if (args[0] === "--help" || args[0] === "-h") {
 } else if (args[0] === "init") {
   init();
 } else {
-  loadConfig(); // fail early on a broken config rather than inside a spawned child
   const forwarded = args.includes("--provider") ? args : [...args, "--provider", "codex"];
-  // The Claude provider gets the Hermes shim too, plus a config home with no Anthropic login in it:
-  // whichever provider is picked in the Even app, nothing here can reach (or bill) a Claude account.
-  const env = {
-    ...process.env,
-    PATH: `${shimDir}${delimiter}${process.env.PATH ?? ""}`,
-    EVEN_TERMINAL_CLAUDE_CODE_EXECUTABLE: join(shimDir, "claude"),
-    CLAUDE_CONFIG_DIR: claudeHome(),
-  };
-  for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"]) delete env[key];
-  mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true, mode: 0o700 });
+  const config = loadConfig(); // also fails early on a broken config rather than inside a spawned child
+  const env = { ...process.env, PATH: `${shimDir}${delimiter}${process.env.PATH ?? ""}` };
+  const hermesAt = config.gateway.mode === "ws" ? `Hermes at ${config.gateway.url}` : "a private Hermes on this machine";
+  let claudeGoes;
+  if (config.providers.claude === "hermes") {
+    // The Claude provider gets the Hermes shim, plus a config home with no Anthropic login in it:
+    // whichever provider is picked in the Even app, nothing here can reach a Claude account.
+    env.EVEN_TERMINAL_CLAUDE_CODE_EXECUTABLE = join(shimDir, "claude");
+    env.CLAUDE_CONFIG_DIR = claudeHome();
+    for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"]) delete env[key];
+    mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true, mode: 0o700 });
+    claudeGoes = `${hermesAt} (no Claude account is contacted)`;
+  } else {
+    // Real Claude Code, through a pass-through that only adds a heads-up to each new session. If it
+    // cannot be found the provider is left exactly as Even Terminal ships it.
+    const real = findRealClaude();
+    if (real) {
+      env.EVEN_TERMINAL_CLAUDE_CODE_EXECUTABLE = join(shimDir, "claude");
+      env.EVEN_HERMES_REAL_CLAUDE = real;
+    }
+    claudeGoes = "the REAL Claude Code on this machine, on its Anthropic login or API key (your usage, your bill). "
+      + `Set providers.claude to "hermes" in ${CONFIG_PATH} to send it to Hermes instead`;
+  }
+  console.log(`[even-hermes] provider "Codex"  → ${hermesAt}`);
+  console.log(`[even-hermes] provider "Claude" → ${claudeGoes}`);
   const child = spawn("even-terminal", forwarded, { stdio: "inherit", env });
   child.on("error", (err) => {
     console.error(err.code === "ENOENT"

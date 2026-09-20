@@ -84,14 +84,19 @@ These never reach Hermes:
 - `hud demo` or `/demo` plays a 30-second canned turn through every row the HUD can show (thinking, shell, labeled tools, search, file edit, status, a failed tool, a reply, the recap). `hud demo start` / `hud demo end` force a `labelAt` mode so you can compare them on the lens.
 - `what did you run?` or `/ran` lists the tools of the last turn, one per line, `✓` or `✗`.
 
-## Both providers go to Hermes, and nothing reaches a Claude account
+## The two providers in the Even app
 
-The Even app lets you pick a provider per session. even-hermes answers both:
+The Even app lets you pick a provider per session, and the choice decides what runs on your machine, so even-hermes prints both routes when it starts and `even-hermes doctor` repeats them.
 
-- **Codex** runs the `codex app-server` shim. Tool rows read `Shell <label>`.
-- **Claude** runs a `claude` shim that speaks the Claude Agent SDK's stream-json protocol. Rows keep the Hermes tool's own name (`browser_navigate example.com/pricing`), Hermes todos drive the task-progress display, and the turn reports a cost of 0.
+- **Codex** always goes to Hermes, through the `codex app-server` shim. Tool rows read `Shell <label>`.
+- **Claude** is yours to decide with `providers.claude`:
 
-The launcher points Even Terminal's Claude provider at the shim (`EVEN_TERMINAL_CLAUDE_CODE_EXECUTABLE`), gives it a config home with no Anthropic login in it (`CLAUDE_CONFIG_DIR=~/.even-hermes/claude-home`), and drops `ANTHROPIC_API_KEY`-style variables from its environment. The shim refuses anything that is not the SDK protocol and never forwards to a real Claude Code, so choosing "Claude" on the glasses cannot spend money. Sessions started on the Claude side are listed from transcripts the shim writes under that config home.
+| `providers.claude` | What "Claude" on the glasses runs |
+|---|---|
+| `"claude"` (default) | The real Claude Code that Even Terminal ships, untouched, on whatever Anthropic login or API key is on that machine. Your usage, your bill. The first reply of each new session starts with a one-line heads-up naming the machine and the kind of account, so nobody learns it from an invoice. |
+| `"hermes"` | Hermes again, through a `claude` shim that speaks the Claude Agent SDK's stream-json protocol. This is the nicer HUD: rows keep the Hermes tool's own name (`browser_navigate example.com/pricing`), Hermes todos drive the task-progress display, and every turn reports a cost of 0. In this mode the provider also gets a config home with no Anthropic login in it and no `ANTHROPIC_*` variables, and the shim never forwards to a real Claude Code, so nothing on the glasses can reach a Claude account. |
+
+Sessions started on the Claude side in `"hermes"` mode are listed from transcripts the shim writes under `~/.even-hermes/claude-home`.
 
 ## Limits
 
