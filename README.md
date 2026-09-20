@@ -84,6 +84,15 @@ These never reach Hermes:
 - `hud demo` or `/demo` plays a 30-second canned turn through every row the HUD can show (thinking, shell, labeled tools, search, file edit, status, a failed tool, a reply, the recap). `hud demo start` / `hud demo end` force a `labelAt` mode so you can compare them on the lens.
 - `what did you run?` or `/ran` lists the tools of the last turn, one per line, `✓` or `✗`.
 
+## Both providers go to Hermes, and nothing reaches a Claude account
+
+The Even app lets you pick a provider per session. even-hermes answers both:
+
+- **Codex** runs the `codex app-server` shim. Tool rows read `Shell <label>`.
+- **Claude** runs a `claude` shim that speaks the Claude Agent SDK's stream-json protocol. Rows keep the Hermes tool's own name (`browser_navigate example.com/pricing`), Hermes todos drive the task-progress display, and the turn reports a cost of 0.
+
+The launcher points Even Terminal's Claude provider at the shim (`EVEN_TERMINAL_CLAUDE_CODE_EXECUTABLE`), gives it a config home with no Anthropic login in it (`CLAUDE_CONFIG_DIR=~/.even-hermes/claude-home`), and drops `ANTHROPIC_API_KEY`-style variables from its environment. The shim refuses anything that is not the SDK protocol and never forwards to a real Claude Code, so choosing "Claude" on the glasses cannot spend money. Sessions started on the Claude side are listed from transcripts the shim writes under that config home.
+
 ## Limits
 
 - Hermes runs where Hermes runs. The project directory you pick in Even Terminal is passed as the session `cwd`, but tools execute on the Hermes host.

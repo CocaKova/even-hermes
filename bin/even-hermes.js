@@ -5,6 +5,7 @@ import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { CONFIG_DIR, CONFIG_PATH, DEFAULT_FIRST_PROMPT_NOTE, loadConfig } from "../src/config.js";
 import { HermesClient } from "../src/hermes-client.js";
+import { claudeHome } from "../src/claude-main.js";
 import { VERSION } from "../src/shim-main.js";
 
 const shimDir = join(dirname(fileURLToPath(import.meta.url)), "..", "shim");
@@ -64,7 +65,16 @@ if (args[0] === "--help" || args[0] === "-h") {
 } else {
   loadConfig(); // fail early on a broken config rather than inside a spawned child
   const forwarded = args.includes("--provider") ? args : [...args, "--provider", "codex"];
-  const env = { ...process.env, PATH: `${shimDir}${delimiter}${process.env.PATH ?? ""}` };
+  // The Claude provider gets the Hermes shim too, plus a config home with no Anthropic login in it:
+  // whichever provider is picked in the Even app, nothing here can reach (or bill) a Claude account.
+  const env = {
+    ...process.env,
+    PATH: `${shimDir}${delimiter}${process.env.PATH ?? ""}`,
+    EVEN_TERMINAL_CLAUDE_CODE_EXECUTABLE: join(shimDir, "claude"),
+    CLAUDE_CONFIG_DIR: claudeHome(),
+  };
+  for (const key of ["ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CLAUDE_CODE_OAUTH_TOKEN"]) delete env[key];
+  mkdirSync(env.CLAUDE_CONFIG_DIR, { recursive: true, mode: 0o700 });
   const child = spawn("even-terminal", forwarded, { stdio: "inherit", env });
   child.on("error", (err) => {
     console.error(err.code === "ENOENT"
