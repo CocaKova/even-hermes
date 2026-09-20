@@ -36,6 +36,9 @@ const DEFAULTS = {
     //            of each new session saying which account it uses
     // "hermes" = Hermes, like Codex (nothing on this machine can then reach a Claude account)
     claude: "claude",
+    // What the "Codex" provider runs: "hermes" (the reason this package exists) or "codex" = your
+    // real Codex CLI, untouched.
+    codex: "hermes",
   },
   hud: {
     // "end"   = a labeled tool row stays in progress until the tool finishes; its label shows then
@@ -77,6 +80,9 @@ export function loadConfig(path = CONFIG_PATH) {
   }
   if (cfg.providers.claude !== "claude" && cfg.providers.claude !== "hermes") {
     throw new Error(`providers.claude must be "claude" or "hermes" (got ${JSON.stringify(cfg.providers.claude)})`);
+  }
+  if (cfg.providers.codex !== "codex" && cfg.providers.codex !== "hermes") {
+    throw new Error(`providers.codex must be "codex" or "hermes" (got ${JSON.stringify(cfg.providers.codex)})`);
   }
   if (cfg.hud.labelAt !== "start" && cfg.hud.labelAt !== "end") {
     throw new Error(`hud.labelAt must be "start" or "end" (got ${JSON.stringify(cfg.hud.labelAt)})`);

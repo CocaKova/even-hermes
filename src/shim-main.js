@@ -1,5 +1,5 @@
 // Entry point for the fake `codex` binary that Even Terminal spawns.
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { accessSync, constants, readFileSync, realpathSync } from "node:fs";
 import { delimiter, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -29,6 +29,19 @@ function findRealCodex() {
 export async function main(argv) {
   if (argv.includes("--version") || argv.includes("-V")) {
     console.log(`even-hermes ${VERSION} (codex app-server shim for Hermes Agent)`);
+    return;
+  }
+  if (loadConfig().providers.codex === "codex") {
+    // The owner wants their real Codex behind the Codex provider: step aside entirely.
+    const real = findRealCodex();
+    if (!real) {
+      log("providers.codex is \"codex\" but no real codex was found on PATH.");
+      process.exit(2);
+    }
+    const child = spawn(real, argv, { stdio: "inherit" });
+    child.on("error", (err) => { log(`could not run ${real}: ${err.message}`); process.exit(1); });
+    child.on("exit", (code, signal) => process.exit(code ?? (signal ? 1 : 0)));
+    for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => child.kill(sig));
     return;
   }
   if (argv[0] !== "app-server") {

@@ -88,13 +88,31 @@ These never reach Hermes:
 
 The Even app lets you pick a provider per session, and the choice decides what runs on your machine, so even-hermes prints both routes when it starts and `even-hermes doctor` repeats them.
 
-- **Codex** always goes to Hermes, through the `codex app-server` shim. Tool rows read `Shell <label>`.
+- **Codex** goes to Hermes through the `codex app-server` shim (or to your real Codex with `providers.codex`, below). Tool rows read `Shell <label>`.
 - **Claude** is yours to decide with `providers.claude`:
 
 | `providers.claude` | What "Claude" on the glasses runs |
 |---|---|
 | `"claude"` (default) | The real Claude Code that Even Terminal ships, untouched, on whatever Anthropic login or API key is on that machine. Your usage, your bill. The first reply of each new session starts with a one-line heads-up naming the machine and the kind of account, so nobody learns it from an invoice. |
 | `"hermes"` | Hermes again, through a `claude` shim that speaks the Claude Agent SDK's stream-json protocol. This is the nicer HUD: rows keep the Hermes tool's own name (`browser_navigate example.com/pricing`), Hermes todos drive the task-progress display, and every turn reports a cost of 0. In this mode the provider also gets a config home with no Anthropic login in it and no `ANTHROPIC_*` variables, and the shim never forwards to a real Claude Code, so nothing on the glasses can reach a Claude account. |
+
+### Switching a provider back to the real thing
+
+Both are one line in `~/.even-hermes/config.json`, then restart even-hermes (`systemctl --user restart even-hermes` if you run it as a service). `even-hermes doctor` shows what each provider will run before you put the glasses on.
+
+```json
+{
+  "providers": {
+    "claude": "claude",
+    "codex": "codex"
+  }
+}
+```
+
+- `"claude": "claude"` runs the real Claude Code (with the heads-up line); `"claude": "hermes"` sends it to Hermes. You need a Claude login or `ANTHROPIC_API_KEY` on that machine for the real one, exactly as with plain Even Terminal.
+- `"codex": "codex"` hands the Codex provider to the real `codex` on your PATH, untouched; `"codex": "hermes"` (default) sends it to Hermes. There is no heads-up line on this side, only the startup banner.
+- Sessions do not cross over: a session started on Hermes stays a Hermes session after you flip a provider, and the real CLI will not find it in its own history (and the other way round). Start a new session after switching.
+- To drop even-hermes entirely, run `even-terminal` instead of `even-hermes`. Nothing is installed into Even Terminal itself; the shims only exist on the PATH of the process even-hermes starts.
 
 Sessions started on the Claude side in `"hermes"` mode are listed from transcripts the shim writes under `~/.even-hermes/claude-home`.
 
