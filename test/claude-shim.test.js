@@ -92,3 +92,11 @@ test("providers.claude = claude passes the real CLI through and says so once per
   const keyed = parse(spawnSync(shim, ["--output-format", "stream-json"], { encoding: "utf8", env: { ...env, ANTHROPIC_API_KEY: "sk-test" } }));
   assert.match(keyed[2].event.delta.text, /billed per token to the Anthropic API key/);
 });
+
+test("providers.codex = codex hands the Codex provider to the real codex", () => {
+  const dir = home({ codex: "codex" });
+  writeFileSync(join(dir, "codex"), "#!/bin/sh\necho REAL CODEX $@\n", { mode: 0o755 });
+  const codexShim = fileURLToPath(new URL("../shim/codex", import.meta.url));
+  const run = spawnSync(codexShim, ["app-server", "--listen", "ws://127.0.0.1:1"], { encoding: "utf8", env: { ...process.env, EVEN_HERMES_HOME: dir, PATH: `${dir}:${process.env.PATH}` } });
+  assert.equal(run.stdout.trim(), "REAL CODEX app-server --listen ws://127.0.0.1:1");
+});

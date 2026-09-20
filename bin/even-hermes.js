@@ -25,6 +25,7 @@ async function doctor() {
   const config = loadConfig();
   console.log(`config:   ${existsSync(CONFIG_PATH) ? CONFIG_PATH : "(defaults — run `even-hermes init`)"}`);
   console.log(`gateway:  ${config.gateway.mode}${config.gateway.mode === "ws" ? ` → ${config.gateway.url}` : " (private tui_gateway process)"}`);
+  console.log(`codex:    the app's "Codex" provider → ${config.providers.codex === "codex" ? "your REAL Codex CLI on this machine (its OpenAI login)" : "Hermes"}`);
   console.log(`claude:   the app's "Claude" provider → ${config.providers.claude === "hermes" ? "Hermes (no Claude account is contacted)" : "the REAL Claude Code on this machine (its Anthropic login or API key)"}`);
   const et = spawnSync("even-terminal", ["--version"], { encoding: "utf8" });
   console.log(`terminal: ${et.error ? "even-terminal NOT FOUND — npm i -g @evenrealities/even-terminal" : `even-terminal ${et.stdout.trim()}`}`);
@@ -107,7 +108,7 @@ if (args[0] === "--help" || args[0] === "-h") {
     claudeGoes = "the REAL Claude Code on this machine, on its Anthropic login or API key (your usage, your bill). "
       + `Set providers.claude to "hermes" in ${CONFIG_PATH} to send it to Hermes instead`;
   }
-  console.log(`[even-hermes] provider "Codex"  → ${hermesAt}`);
+  console.log(`[even-hermes] provider "Codex"  → ${config.providers.codex === "codex" ? "your REAL Codex CLI on this machine (its OpenAI login, your usage)" : hermesAt}`);
   console.log(`[even-hermes] provider "Claude" → ${claudeGoes}`);
   const child = spawn("even-terminal", forwarded, { stdio: "inherit", env });
   child.on("error", (err) => {
