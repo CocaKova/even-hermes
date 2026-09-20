@@ -1,10 +1,14 @@
 // Entry point for the fake `claude` binary that Even Terminal's Claude provider spawns through the
 // Claude Agent SDK. It speaks the SDK's stream-json protocol on stdio and runs the turn on Hermes.
 //
-// It NEVER forwards to a real Claude Code CLI: the whole point is that picking "Claude" in the Even
-// app must not reach (or bill) an Anthropic account.
+// providers.claude decides what it does:
+//   "hermes" — the turn runs on Hermes, and nothing is ever forwarded to a real Claude Code.
+//   "claude" — the real Claude Code runs untouched; the shim only adds a heads-up to the first
+//              reply of each new session, so nobody finds out from a bill which account they reached.
+import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { ClaudeStream } from "./claude-stream.js";
@@ -232,13 +236,52 @@ class Shim {
   }
 }
 
+/** One line for the HUD: what this session talks to and whose account pays for it. */
+export function headsUp(env = process.env) {
+  const account = env.ANTHROPIC_API_KEY || env.ANTHROPIC_AUTH_TOKEN
+    ? "billed per token to the Anthropic API key set there"
+    : "using the Claude login there, so it counts against that plan";
+  return `[Heads up: this is the real Claude Code on ${hostname()}, ${account}. For Hermes pick Codex, or set providers.claude to "hermes".]\n\n`;
+}
+
+/** Run the real Claude Code, adding the heads-up right after a new session's init message. */
+function proxy(real, argv) {
+  const child = spawn(real, argv, { stdio: ["inherit", "pipe", "inherit"] });
+  let pending = !argv.includes("--resume");
+  createInterface({ input: child.stdout }).on("line", (line) => {
+    process.stdout.write(`${line}\n`);
+    if (!pending) return;
+    let msg;
+    try { msg = JSON.parse(line); } catch { return; }
+    if (msg?.type !== "system" || msg.subtype !== "init") return;
+    pending = false;
+    const event = (e) => send({ type: "stream_event", event: e, session_id: msg.session_id, parent_tool_use_id: null, uuid: randomUUID() });
+    event({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } });
+    event({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: headsUp() } });
+    event({ type: "content_block_stop", index: 0 });
+  });
+  child.on("error", (err) => { log(`could not run the real Claude Code (${real}): ${err.message}`); process.exit(1); });
+  child.on("exit", (code, signal) => process.stdout.write("", () => process.exit(code ?? (signal ? 1 : 0))));
+  for (const sig of ["SIGINT", "SIGTERM"]) process.on(sig, () => child.kill(sig));
+}
+
 export async function main(argv) {
+  const sdk = argv.includes("stream-json");
+  if (loadConfig().providers.claude === "claude") {
+    const real = process.env.EVEN_HERMES_REAL_CLAUDE;
+    if (!real) {
+      log("providers.claude is \"claude\" but the launcher found no real Claude Code to run.");
+      process.exit(2);
+    }
+    if (sdk) return proxy(real, argv);
+    process.exit(spawnSync(real, argv, { stdio: "inherit" }).status ?? 1);
+  }
   if (argv.includes("--version") || argv.includes("-v")) {
     console.log(`${VERSION} (even-hermes: Hermes Agent behind the Claude provider)`);
     return;
   }
-  if (!argv.includes("stream-json")) {
-    log("this `claude` is the even-hermes shim: it only serves Even Terminal's Claude provider and never runs the real Claude Code.");
+  if (!sdk) {
+    log("this `claude` is the even-hermes shim: with providers.claude = \"hermes\" it only serves Even Terminal's Claude provider and never runs the real Claude Code.");
     process.exit(2);
   }
   const shim = new Shim(argv);
