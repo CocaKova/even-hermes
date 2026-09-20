@@ -105,6 +105,7 @@ Sessions started on the Claude side in `"hermes"` mode are listed from transcrip
 - In `ws` mode, resuming a session that another client has open takes over its live stream, as any second Hermes client would.
 - If the gateway connection drops mid-turn, the turn is reported as failed on the glasses rather than hanging. It may still finish on the Hermes side; resume the session to see.
 - `even-terminal codex` (the desktop Codex TUI attached to Even Terminal) is not supported through the shim. Other `codex` subcommands are forwarded to your real Codex if one is installed.
+- On the Claude side in `"hermes"` mode every turn is its own short-lived process (that is how the Agent SDK drives a CLI), so each turn re-attaches to the stored Hermes session; approvals there are once-or-deny, with no "always" option.
 - Approval and clarify flows are covered by tests against a mock gateway; the rest was verified against Hermes Agent v0.21.3 and Even Terminal 0.10.4. Both protocols are young and may move.
 
 ## Development
@@ -115,7 +116,7 @@ npm test
 
 `src/translate.js` is the pure event translation, `src/app-server.js` the Codex-facing server, `src/hermes-client.js` the gateway transport.
 
-Not affiliated with Even Realities, Nous Research or OpenAI.
+Not affiliated with Even Realities, Nous Research, OpenAI or Anthropic.
 
 ## License
 
