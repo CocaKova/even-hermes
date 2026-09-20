@@ -22,7 +22,7 @@ glasses ─ Even app ─ Even Terminal ─ "codex app-server" ─ Hermes gateway
 | command approval | Hermes `approval` request |
 | user question | Hermes `clarify` request |
 
-Hermes events come back as Codex items: reasoning, streamed reply text, and tool calls (terminal commands show as shell commands with their output, web searches as searches, file edits as diffs, everything else as a named tool).
+Hermes events come back as Codex items: reasoning, streamed reply text, and tool calls (terminal commands show as shell commands with their output, web searches as searches, file edits as diffs, everything else as a named tool). Status rides the same items: the thinking indicator lights as soon as Hermes calls the model (not only once reasoning text arrives), a tool row opens while the model is still writing the call, and lifecycle status (context compaction, provider recovery, warnings) shows as a `status:<kind>` row that stays in progress until the turn moves on.
 
 Hermes stays the agent. It runs its own tools, skills and memory on its own host. Nothing from Codex is involved, so there is no second system prompt and no second tool loop. Pointing the real Codex CLI at Hermes's OpenAI-compatible endpoint does not work well for exactly that reason: Hermes ignores the tools Codex offers and does the work itself.
 

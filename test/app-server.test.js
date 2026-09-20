@@ -197,3 +197,37 @@ test("losing the gateway fails the running turn instead of hanging the HUD", asy
   assert.match(done.params.turn.error.message, /Lost the connection/);
   t.close();
 });
+
+test("status indicators: thinking before any reasoning text, early tool rows, lifecycle status", async () => {
+  const t = await setup();
+  const { result: { thread } } = await t.call("thread/start", {});
+  await t.call("turn/start", { threadId: thread.id, input: textInput("go") });
+  await t.waitFor((m) => m.method === "item/completed" && m.params.item.type === "userMessage");
+
+  t.hermes.event("rt1", "thinking.delta", { text: "(•_•) pondering..." });
+  const think = await t.waitFor((m) => m.method === "item/started" && m.params.item.type === "reasoning");
+  t.hermes.event("rt1", "thinking.delta", { text: "" });
+  t.hermes.event("rt1", "tool.generating", { name: "terminal" });
+  const early = await t.waitFor((m) => m.method === "item/started" && m.params.item.type === "commandExecution");
+  t.hermes.event("rt1", "tool.start", { tool_id: "c1", name: "terminal", args: { command: "ls" } });
+  t.hermes.event("rt1", "tool.complete", { tool_id: "c1", name: "terminal", args: { command: "ls" }, result: { output: "a", exit_code: 0 } });
+  t.hermes.event("rt1", "status.update", { kind: "status", text: "ready" });
+  t.hermes.event("rt1", "status.update", { kind: "compacting", text: "Compressing context…" });
+  t.hermes.event("rt1", "status.update", { kind: "compacting", text: "Compressing context…" });
+  t.hermes.event("rt1", "message.delta", { text: "done" });
+  t.hermes.event("rt1", "thinking.delta", { text: "(•_•) still here..." });
+  t.hermes.event("rt1", "message.delta", { text: "!" });
+  t.hermes.event("rt1", "tool.generating", { name: "web_search" });
+  t.hermes.event("rt1", "message.complete", { text: "done!", status: "complete" });
+  await t.waitFor((m) => m.method === "turn/completed");
+
+  const completed = t.inbox.filter((m) => m.method === "item/completed").map((m) => m.params.item);
+  assert.deepEqual(completed.map((i) => i.type), ["userMessage", "reasoning", "commandExecution", "mcpToolCall", "agentMessage", "webSearch"]);
+  assert.equal(completed[1].id, think.params.item.id);
+  assert.equal(completed[2].id, early.params.item.id, "tool.start claims the row tool.generating opened");
+  assert.equal(completed[2].command, "ls");
+  assert.deepEqual([completed[3].tool, completed[3].result, completed[3].status], ["status:compacting", "Compressing context…", "completed"]);
+  assert.equal(completed[4].text, "done!", "a spinner tick never splits a streaming reply");
+  assert.equal(completed[5].status, "failed", "a tool that was announced but never ran does not hang in progress");
+  t.close();
+});

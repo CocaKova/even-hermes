@@ -6,6 +6,8 @@ const newId = (prefix) => `${prefix}_${randomUUID().replace(/-/g, "").slice(0, 1
 
 const FILE_TOOL = /(^|_)(write|patch|edit)(_|$)|write_file|apply_patch/i;
 const SEARCH_TOOL = /web_?search/i;
+const SHELL_TOOL = /^(terminal|shell|bash|execute_command)$/i;
+const QUIET_STATUS = new Set(["ready", "heartbeat"]); // idle chatter, not something a turn is waiting on
 
 function stringify(value, max = 4000) {
   if (value === undefined || value === null) return "";
@@ -37,6 +39,13 @@ export function toolItem(id, payload, done) {
   if (SEARCH_TOOL.test(name) && typeof args.query === "string") {
     return { type: "webSearch", id, query: args.query, status };
   }
+  // `tool.generating` names the tool before its args exist: pick the shape from the name alone so
+  // the item keeps one type from the first indicator through completion.
+  if (!done && !Object.keys(args).length) {
+    if (SHELL_TOOL.test(name)) return { type: "commandExecution", id, command: "", status };
+    if (SEARCH_TOOL.test(name)) return { type: "webSearch", id, query: "", status };
+    if (FILE_TOOL.test(name)) return { type: "fileChange", id, status, changes: [] };
+  }
   const path = args.path ?? args.file_path ?? args.filename;
   if (FILE_TOOL.test(name) && typeof path === "string") {
     return {
@@ -58,6 +67,8 @@ export class TurnTranslator {
     this.items = [];
     this.open = null; // the streaming reasoning / agentMessage item, if any
     this.tools = new Map(); // hermes tool_id → item id
+    this.generating = []; // { name, id } announced by tool.generating, not yet claimed by a tool.start
+    this.status = null; // the in-progress status row, if any
     this.sawText = false;
     this.done = false;
   }
@@ -76,7 +87,23 @@ export class TurnTranslator {
 
   handle(type, payload = {}) {
     if (this.done) return;
+    if (type !== "status.update" && type !== "thinking.delta") this.#closeStatus();
     switch (type) {
+      case "thinking.delta":
+        // The spinner line fires as each model call begins, before (or without) reasoning text:
+        // it is the earliest honest "thinking" signal. Never split a reply that is mid-stream.
+        if (!this.open && String(payload.text ?? "").trim()) this.#openItem("reasoning");
+        return;
+      case "tool.generating": {
+        this.#closeOpen();
+        const pending = { name: String(payload.name ?? "tool"), id: newId("tool") };
+        this.generating.push(pending);
+        this.#started(toolItem(pending.id, { name: pending.name }, false));
+        return;
+      }
+      case "status.update":
+        this.#statusRow(String(payload.kind ?? "status"), String(payload.text ?? "").trim());
+        return;
       case "reasoning.delta":
       case "reasoning.available":
         if (type === "reasoning.available" && this.sawText) return; // trailing recap of a streamed reply
@@ -91,7 +118,8 @@ export class TurnTranslator {
         return;
       case "tool.start": {
         this.#closeOpen();
-        const id = newId("tool");
+        const at = this.generating.findIndex((g) => g.name === String(payload.name ?? "tool"));
+        const id = at === -1 ? newId("tool") : this.generating.splice(at, 1)[0].id;
         this.tools.set(String(payload.tool_id ?? id), id);
         this.#started(toolItem(id, payload, false));
         return;
@@ -111,24 +139,26 @@ export class TurnTranslator {
         this.finish(payload);
         return;
       default:
-        return; // status lines, usage ticks, kaomoji "thinking" spinners: nothing a HUD needs
+        return; // usage ticks, session info: nothing a HUD needs
     }
   }
 
   finish(payload = {}) {
     if (this.done) return;
     this.#closeOpen();
+    this.#closeStatus();
     const finalText = typeof payload.text === "string" ? payload.text.trim() : "";
     if (!this.sawText && finalText) {
       const item = { type: "agentMessage", id: newId("msg"), text: finalText };
       this.#started(item);
       this.#completed(item);
     }
-    for (const [, id] of this.tools) {
+    for (const id of [...this.tools.values(), ...this.generating.map((g) => g.id)]) {
       const item = this.items.find((i) => i.id === id);
       if (item) this.#completed({ ...item, status: "failed" });
     }
     this.tools.clear();
+    this.generating = [];
     this.done = true;
     const status = payload.status === "interrupted" ? "interrupted"
       : payload.status === "error" || payload.error ? "failed" : "completed";
@@ -150,14 +180,12 @@ export class TurnTranslator {
   #stream(kind, text) {
     if (!text) return;
     if (this.open && this.open.type !== kind) this.#closeOpen();
-    if (!this.open) {
+    const body = this.open ? (kind === "reasoning" ? this.open.summary[0] : this.open.text) : "";
+    if (!body) {
       text = text.replace(/^\s+/, ""); // models often lead a reply with blank lines
       if (!text) return;
-      this.open = kind === "reasoning"
-        ? { type: "reasoning", id: newId("rsn"), summary: [""], content: [] }
-        : { type: "agentMessage", id: newId("msg"), text: "" };
-      this.#started(this.open);
     }
+    if (!this.open) this.#openItem(kind);
     if (kind === "reasoning") {
       this.open.summary[0] += text;
       return;
@@ -165,6 +193,30 @@ export class TurnTranslator {
     this.sawText = true;
     this.open.text += text;
     this.emit("item/agentMessage/delta", { threadId: this.threadId, turnId: this.turnId, itemId: this.open.id, delta: text });
+  }
+
+  #openItem(kind) {
+    this.open = kind === "reasoning"
+      ? { type: "reasoning", id: newId("rsn"), summary: [""], content: [] }
+      : { type: "agentMessage", id: newId("msg"), text: "" };
+    this.#started(this.open);
+  }
+
+  /** Lifecycle status (compaction, provider recovery, warnings) as a tool-shaped row: the HUD has
+   *  no free-text status channel, and a row that stays in progress reads as "busy", not "hung". */
+  #statusRow(kind, text) {
+    if (!text || QUIET_STATUS.has(kind) || QUIET_STATUS.has(text)) return;
+    if (this.status?.result === text) return;
+    this.#closeStatus();
+    this.status = { type: "mcpToolCall", id: newId("sts"), server: "hermes", tool: `status:${kind}`, arguments: {}, status: "inProgress", result: text };
+    this.#started(this.status);
+  }
+
+  #closeStatus() {
+    if (!this.status) return;
+    const item = { ...this.status, status: "completed" };
+    this.status = null;
+    this.#completed(item);
   }
 
   #closeOpen() {
