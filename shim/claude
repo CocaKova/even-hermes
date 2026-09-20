@@ -1,0 +1,7 @@
+#!/usr/bin/env node
+// Even Terminal's Claude provider runs this instead of Claude Code; the turn goes to Hermes.
+import { main } from "../src/claude-main.js";
+main(process.argv.slice(2)).catch((err) => {
+  process.stderr.write(`[even-hermes] fatal: ${err.stack || err.message}\n`);
+  process.exit(1);
+});

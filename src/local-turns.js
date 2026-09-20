@@ -18,6 +18,7 @@ function demo(labelAt) {
     events: [
       [500, "thinking.delta", { text: "(•_•) pondering..." }],
       [1500, "reasoning.delta", { text: "Walking through every row the HUD can show." }],
+      [300, "todo.updated", { todos: [{ content: "Show every HUD row", status: "in_progress" }, { content: "Report back", status: "pending" }] }],
       ...tool("d1", "terminal", { command: "ls -la ~/workspace" }, { output: "even-hermes\nkeryx", exit_code: 0 }),
       ...tool("d2", "browser_navigate", { url: "https://gardenofnull.cc/portfolio" }, { title: "Garden of Null" }),
       ...tool("d3", "web_search", { query: "even realities g2 sdk" }, { results: 5 }),
@@ -26,6 +27,7 @@ function demo(labelAt) {
       [1000, "status.update", { kind: "compacting", text: "Compressing context…" }],
       [3000, "thinking.delta", { text: "(•_•) pondering..." }],
       ...tool("d6", "brain_recall", { query: "keryx ship gate" }, { error: "recall timed out" }),
+      [300, "todo.updated", { todos: [{ content: "Show every HUD row", status: "completed" }, { content: "Report back", status: "in_progress" }] }],
       ...say.match(/\S+\s*/g).map((word) => [60, "message.delta", { text: word }]),
       [300, "message.complete", { text: say, status: "complete" }],
     ],
