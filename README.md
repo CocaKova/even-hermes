@@ -22,7 +22,7 @@ glasses ─ Even app ─ Even Terminal ─ "codex app-server" ─ Hermes gateway
 | command approval | Hermes `approval` request |
 | user question | Hermes `clarify` request |
 
-Hermes events come back as Codex items: reasoning, streamed reply text, and tool calls (terminal commands show as shell commands with their output, web searches as searches, file edits as diffs, everything else as a named tool). Status rides the same items: the thinking indicator lights as soon as Hermes calls the model (not only once reasoning text arrives), a tool row opens while the model is still writing the call, and lifecycle status (context compaction, provider recovery, warnings) shows as a `status:<kind>` row that stays in progress until the turn moves on.
+Hermes events come back as Codex items: reasoning, streamed reply text, and tool calls (terminal commands show as shell commands with their output, web searches as searches, file edits as diffs, everything else as a named tool). The HUD prints free text only for shell and search rows, so every other tool rides a shell row labeled with its name and most telling argument (`Shell browser_navigate example.com/pricing`, `Shell delegate: audit the cron jobs`, a leading `✗` when it failed). Status rides the same rows: the thinking indicator lights as soon as Hermes calls the model, a tool row opens while the model is still writing the call, and lifecycle status (context compaction, provider recovery, warnings) shows as a `compacting: …` row that stays in progress until the turn moves on.
 
 Hermes stays the agent. It runs its own tools, skills and memory on its own host. Nothing from Codex is involved, so there is no second system prompt and no second tool loop. Pointing the real Codex CLI at Hermes's OpenAI-compatible endpoint does not work well for exactly that reason: Hermes ignores the tools Codex offers and does the work itself.
 
@@ -69,6 +69,20 @@ For a dashboard with login enabled, give `username` plus `password` or `password
 | `session.firstPromptNote` | Prepended to the first prompt of each new thread, telling the agent it is writing to a tiny HUD so it keeps replies short. Never shown on the glasses. Set to `""` to send prompts untouched. |
 | `session.model`, `session.reasoningEffort`, `session.profile` | Passed to `session.create`. Empty means your Hermes defaults. |
 | `session.source` | Source tag on created sessions (default `even-terminal`). |
+
+### HUD options
+
+| Key | Meaning |
+|---|---|
+| `hud.labelAt` | `"end"` (default): a labeled tool row stays in progress until the tool finishes, and its label shows then. `"start"`: the row completes as the tool starts, so the label shows while the tool runs. |
+| `hud.recap` | `true` adds one line after each reply: `⚙ 7 tools · 3 shell · 2 browser · 1 failed · 41s`. Default `false`. |
+
+### Prompts the bridge answers itself
+
+These never reach Hermes:
+
+- `hud demo` or `/demo` plays a 30-second canned turn through every row the HUD can show (thinking, shell, labeled tools, search, file edit, status, a failed tool, a reply, the recap). `hud demo start` / `hud demo end` force a `labelAt` mode so you can compare them on the lens.
+- `what did you run?` or `/ran` lists the tools of the last turn, one per line, `✓` or `✗`.
 
 ## Limits
 
