@@ -1,6 +1,6 @@
 {
   "name": "even-hermes",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Run your Hermes Agent on Even Realities smart glasses: a codex app-server shim that bridges Even Terminal to the Hermes gateway.",
   "type": "module",
   "bin": {

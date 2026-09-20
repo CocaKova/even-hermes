@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { WebSocketServer } from "ws";
 import { CONFIG_DIR } from "./config.js";
 import { HermesRpcError } from "./hermes-client.js";
+import { localScript } from "./local-turns.js";
 import { TurnTranslator, transcriptToTurns } from "./translate.js";
 
 const THREAD_NOT_FOUND = -32004;
@@ -244,6 +245,8 @@ export class AppServer {
       .filter((part) => part?.type === "text" && typeof part.text === "string")
       .map((part) => part.text).join("\n").trim();
     if (!text) throw new RpcError(-32602, "turn/start needs a text input");
+    const script = localScript(text, thread.lastRun);
+    if (script) return this.#playLocal(thread, text, script);
 
     const note = this.config.session.firstPromptNote;
     const outgoing = !thread.noted && note ? `${note}\n\n${text}` : text;
@@ -270,7 +273,7 @@ export class AppServer {
     if (!thread.preview) thread.preview = text.slice(0, 80);
     this.#persist(thread);
 
-    const turn = new TurnTranslator(threadId, (method, p) => this.#notify(method, p));
+    const turn = new TurnTranslator(threadId, (method, p) => this.#notify(method, p), this.config.hud);
     thread.turn = turn;
     // The reply must reach the client before the turn's first notification.
     setImmediate(() => {
@@ -283,8 +286,30 @@ export class AppServer {
     return { id: turn.turnId, status: "inProgress", items: [] };
   }
 
+  /** A turn answered by the bridge itself (HUD demo, tool replay): Hermes never sees it. */
+  #playLocal(thread, text, script) {
+    const turn = new TurnTranslator(thread.id, (method, p) => this.#notify(method, p), { ...this.config.hud, ...script.hud });
+    turn.local = true;
+    thread.turn = turn;
+    thread.localTimers = [];
+    let at = 0;
+    const step = (delay, fn) => thread.localTimers.push(setTimeout(() => {
+      if (turn.done) return;
+      fn();
+      if (turn.done) this.#sealTurn(thread);
+    }, at += delay));
+    step(0, () => turn.start(text));
+    for (const [delay, type, payload] of script.events) step(delay, () => turn.handle(type, payload));
+    return { id: turn.turnId, status: "inProgress", items: [] };
+  }
+
   async #turnInterrupt(threadId) {
     const thread = this.threads.get(threadId);
+    if (thread?.turn?.local) {
+      thread.turn.finish({ status: "interrupted" });
+      this.#sealTurn(thread);
+      return {};
+    }
     if (thread?.runtimeId) {
       await this.hermes.call("session.interrupt", { session_id: thread.runtimeId }).catch((err) => this.log(`interrupt failed: ${err.message}`));
     }
@@ -336,6 +361,9 @@ export class AppServer {
 
   #sealTurn(thread) {
     if (!thread.turn) return;
+    for (const timer of thread.localTimers ?? []) clearTimeout(timer);
+    thread.localTimers = null;
+    if (!thread.turn.local) thread.lastRun = thread.turn.ran;
     (thread.history ??= []).push(thread.turn.snapshot());
     thread.turn = null;
     thread.updatedAt = Date.now() / 1000;

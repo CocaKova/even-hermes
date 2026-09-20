@@ -30,6 +30,12 @@ const DEFAULTS = {
     reasoningEffort: "",
     firstPromptNote: DEFAULT_FIRST_PROMPT_NOTE,
   },
+  hud: {
+    // "end"   = a labeled tool row stays in progress until the tool finishes; its label shows then
+    // "start" = the row completes as the tool starts, so the label shows while the tool runs
+    labelAt: "end",
+    recap: false, // one line after each reply: "⚙ 7 tools · 3 shell · 2 browser · 41s"
+  },
   listLimit: 25,
 };
 
@@ -61,6 +67,9 @@ export function loadConfig(path = CONFIG_PATH) {
   if (env.EVEN_HERMES_TOKEN) cfg.gateway.token = env.EVEN_HERMES_TOKEN;
   if (cfg.gateway.mode !== "ws" && cfg.gateway.mode !== "stdio") {
     throw new Error(`gateway.mode must be "ws" or "stdio" (got ${JSON.stringify(cfg.gateway.mode)})`);
+  }
+  if (cfg.hud.labelAt !== "start" && cfg.hud.labelAt !== "end") {
+    throw new Error(`hud.labelAt must be "start" or "end" (got ${JSON.stringify(cfg.hud.labelAt)})`);
   }
   return cfg;
 }

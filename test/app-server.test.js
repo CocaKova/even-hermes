@@ -11,9 +11,9 @@ const { MockHermes } = await import("./mock-gateway.js");
 
 const NOTE = "[glasses]";
 
-async function setup() {
+async function setup(hud = {}) {
   const hermes = new MockHermes();
-  const config = { gateway: { mode: "stdio" }, session: { source: "even-terminal", firstPromptNote: NOTE }, listLimit: 25 };
+  const config = { gateway: { mode: "stdio" }, session: { source: "even-terminal", firstPromptNote: NOTE }, hud, listLimit: 25 };
   const server = new AppServer({ hermes, config, version: "test" });
   const { port } = await server.listen("127.0.0.1", 0);
   const ws = new WebSocket(`ws://127.0.0.1:${port}`);
@@ -222,12 +222,75 @@ test("status indicators: thinking before any reasoning text, early tool rows, li
   await t.waitFor((m) => m.method === "turn/completed");
 
   const completed = t.inbox.filter((m) => m.method === "item/completed").map((m) => m.params.item);
-  assert.deepEqual(completed.map((i) => i.type), ["userMessage", "reasoning", "commandExecution", "mcpToolCall", "agentMessage", "webSearch"]);
+  assert.deepEqual(completed.map((i) => i.type), ["userMessage", "reasoning", "commandExecution", "commandExecution", "agentMessage", "webSearch"]);
   assert.equal(completed[1].id, think.params.item.id);
   assert.equal(completed[2].id, early.params.item.id, "tool.start claims the row tool.generating opened");
   assert.equal(completed[2].command, "ls");
-  assert.deepEqual([completed[3].tool, completed[3].result, completed[3].status], ["status:compacting", "Compressing context…", "completed"]);
+  assert.deepEqual([completed[3].command, completed[3].status], ["compacting: Compressing context…", "completed"]);
   assert.equal(completed[4].text, "done!", "a spinner tick never splits a streaming reply");
   assert.equal(completed[5].status, "failed", "a tool that was announced but never ran does not hang in progress");
   t.close();
+});
+
+const browse = { tool_id: "b1", name: "browser_navigate", args: { url: "https://www.example.com/pricing" } };
+
+test("tools without a native shape ride labeled rows; the recap and /ran list what ran", async () => {
+  const t = await setup({ recap: true });
+  const { result: { thread } } = await t.call("thread/start", {});
+  await t.call("turn/start", { threadId: thread.id, input: textInput("go") });
+  await t.waitFor((m) => m.method === "turn/started");
+  t.hermes.event("rt1", "tool.start", browse);
+  t.hermes.event("rt1", "tool.complete", { ...browse, result: { error: "timeout" } });
+  t.hermes.event("rt1", "tool.start", { tool_id: "c1", name: "terminal", args: { command: "ls" } });
+  t.hermes.event("rt1", "tool.complete", { tool_id: "c1", name: "terminal", args: { command: "ls" }, result: { exit_code: 0 } });
+  t.hermes.event("rt1", "message.complete", { text: "ok", status: "complete" });
+  await t.waitFor((m) => m.method === "turn/completed");
+
+  const done = t.inbox.filter((m) => m.method === "item/completed").map((m) => m.params.item);
+  const row = done.find((i) => i.command?.includes("browser_navigate"));
+  assert.deepEqual([row.type, row.command, row.status], ["commandExecution", "✗ browser_navigate example.com/pricing", "failed"]);
+  assert.match(done.at(-1).text, /^\n\n⚙ 2 tools · 1 browser · 1 shell · 1 failed · \d+s$/);
+
+  const before = t.hermes.calls.filter((c) => c.method === "prompt.submit").length;
+  await t.call("turn/start", { threadId: thread.id, input: textInput("What did you run?") });
+  const replay = await t.waitFor((m) => m.method === "item/completed" && m.params.item.text?.includes("✗"));
+  assert.equal(replay.params.item.text, "✗ browser_navigate example.com/pricing\n✓ ls");
+  assert.equal(t.hermes.calls.filter((c) => c.method === "prompt.submit").length, before, "answered locally, Hermes never sees it");
+  t.close();
+});
+
+test("labelAt start shows the label while the tool runs and closes the row once", async () => {
+  const t = await setup({ labelAt: "start" });
+  const { result: { thread } } = await t.call("thread/start", {});
+  await t.call("turn/start", { threadId: thread.id, input: textInput("go") });
+  await t.waitFor((m) => m.method === "turn/started");
+  t.hermes.event("rt1", "tool.start", browse);
+  const early = await t.waitFor((m) => m.method === "item/completed" && m.params.item.command);
+  assert.equal(early.params.item.status, "completed");
+  t.hermes.event("rt1", "tool.complete", { ...browse, result: { title: "Pricing" } });
+  t.hermes.event("rt1", "message.complete", { text: "ok", status: "complete" });
+  await t.waitFor((m) => m.method === "turn/completed");
+  assert.equal(t.inbox.filter((m) => m.method === "item/completed" && m.params.item.command).length, 1);
+  t.close();
+});
+
+test("the HUD demo plays locally and can be interrupted", async () => {
+  const t = await setup();
+  const { result: { thread } } = await t.call("thread/start", {});
+  await t.call("turn/start", { threadId: thread.id, input: textInput("hud demo start") });
+  await t.waitFor((m) => m.method === "item/started" && m.params.item.type === "reasoning");
+  await t.call("turn/interrupt", { threadId: thread.id });
+  const done = await t.waitFor((m) => m.method === "turn/completed");
+  assert.equal(done.params.turn.status, "interrupted");
+  assert.equal(t.hermes.calls.filter((c) => c.method === "prompt.submit").length, 0);
+  t.close();
+});
+
+test("every demo tool opens and closes, and ordinary prompts are not intercepted", async () => {
+  const { localScript } = await import("../src/local-turns.js");
+  assert.equal(localScript("give me a demo of the app"), null);
+  const { events } = localScript("/demo");
+  const ids = (type) => events.filter((e) => e[1] === type).map((e) => e[2].tool_id).sort();
+  assert.deepEqual(ids("tool.start"), ids("tool.complete"));
+  assert.equal(events.at(-1)[1], "message.complete");
 });
