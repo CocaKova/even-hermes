@@ -98,7 +98,7 @@ export class HermesClient extends EventEmitter {
       p.reject(new Error(`Hermes gateway disconnected: ${reason}`));
     }
     this.pending.clear();
-    this.log(`gateway connection lost: ${reason}`);
+    if (!this.closed) this.log(`gateway connection lost: ${reason}`);
     this.emit("down", reason);
     if (!this.closed) this.#scheduleReconnect();
   }
