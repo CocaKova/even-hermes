@@ -41,6 +41,27 @@ even-hermes          # starts Even Terminal with Hermes as the agent; scan the Q
 
 Arguments pass straight through to `even-terminal` (`even-hermes --tailscale --port 3456`). Your normal `codex` command is untouched; the shim is only on `PATH` for the process `even-hermes` starts.
 
+### Keeping it running
+
+Started from a shell, it dies with that shell and the glasses say the terminal is unreachable. On Linux a systemd user unit fixes that (`~/.config/systemd/user/even-hermes.service`, then `systemctl --user enable --now even-hermes`):
+
+```ini
+[Unit]
+Description=even-hermes
+After=network-online.target
+
+[Service]
+Environment=PATH=%h/.npm-global/bin:%h/.local/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.npm-global/bin/even-hermes --tailscale --port 3456
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=default.target
+```
+
+Adjust the paths to wherever `npm link` put `even-hermes` (`which even-hermes`). Even Terminal keeps its pairing token, so a restart does not need a new QR scan. Run `loginctl enable-linger $USER` if it should survive you logging out.
+
 ## Two ways to reach Hermes
 
 Config lives in `~/.even-hermes/config.json` (`even-hermes init` writes a starter, `init --ws` for dashboard mode).
@@ -133,6 +154,18 @@ npm test
 ```
 
 `src/translate.js` is the pure event translation, `src/app-server.js` the Codex-facing server, `src/hermes-client.js` the gateway transport.
+
+## Putting a different agent behind it
+
+Nothing on the Even Terminal side is specific to Hermes. If you have your own agent, the glasses-facing half is reusable as it stands and the Hermes half is two files:
+
+- **Keep** `shim/`, `bin/even-hermes.js`, `src/app-server.js` (the `codex app-server` protocol Even Terminal drives) and `src/claude-stream.js` (the Claude Agent SDK stream-json side). These are the parts that took packet-watching to get right.
+- **Replace** `src/hermes-client.js` with a client for your agent. The rest of the code only needs `call(method, params)` plus three emitted events: `event` (streamed turn events), `request` (the agent asks the wearer to approve or answer something) and `down`. The calls made are `session.create`, `session.list`, `session.resume`, `session.close`, `prompt.submit` and `session.interrupt`.
+- **Adapt** `src/translate.js`, which turns agent events into HUD rows. It reads `thinking.delta`, `reasoning.delta`, `message.delta`, `message.complete`, `tool.generating`, `tool.start`, `tool.complete`, `status.update` and `error`. Emit those names from your client and you may not need to touch it.
+
+`test/mock-gateway.js` is a 34-line fake agent that the test suite runs against, and the quickest way to see the expected shapes. `hud demo` (above) exercises every HUD row with no agent at all, so you can check your glasses before writing any code.
+
+What the HUD can and cannot show, learned the hard way: only shell and web-search rows print free text, every other tool type shows a fixed word, there is no channel for thinking text or a free-form status line, and token usage is only read at the end of a turn.
 
 Not affiliated with Even Realities, Nous Research, OpenAI or Anthropic.
 
